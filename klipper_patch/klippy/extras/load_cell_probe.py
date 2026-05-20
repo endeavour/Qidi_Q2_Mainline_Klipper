@@ -352,6 +352,9 @@ class LoadCellProbingMove:
     # Wait for the MCU to trigger with no movement
     def probing_test(self, gcmd, timeout):
         self._pause_and_tare(gcmd)
+        # Use full sensor ADC range for tap test (avoid RAW_RANGE on sharp taps)
+        sensor_min, sensor_max = self._load_cell.get_sensor().get_range()
+        self._mcu_trigger_analog.set_raw_range(sensor_min, sensor_max)
         toolhead = self._printer.lookup_object('toolhead')
         print_time = toolhead.get_last_move_time()
         self._mcu_trigger_analog.home_start(print_time, 0., 0, 0.)

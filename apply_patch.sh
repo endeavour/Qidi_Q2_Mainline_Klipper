@@ -30,9 +30,10 @@ apply_klipper_patch() {
 
   install -D "$PATCH_DIR/klippy/extras/cs1237.py" \
     "$KLIPPER_DIR/klippy/extras/cs1237.py"
+  install -D "$PATCH_DIR/klippy/extras/load_cell.py" \
+    "$KLIPPER_DIR/klippy/extras/load_cell.py"
 
   python3 "$SCRIPT_DIR/scripts/merge_cs1237_extras.py" \
-    "$KLIPPER_DIR/klippy/extras/load_cell.py" \
     "$KLIPPER_DIR/klippy/extras/load_cell_probe.py"
 
   install -D "$PATCH_DIR/src/sensor_cs1237.c" \
