@@ -56,13 +56,15 @@ class CS1237:
         refout_off = int(config.getboolean('refout_off', default=False))
         config_reg = (refout_off << 6) | (speed_sel << 4)
         config_reg |= (gain_bits << 2) | chan_sel
-        # Bulk Sensor Setup
-        self.bulk_queue = bulk_sensor.BulkDataQueue(mcu, oid=self.oid)
-        chip_smooth = self.sps * UPDATE_INTERVAL * 2
+        # Bulk Sensor Setup (BulkDataQueue is created in _build_config)
+        batch_interval = config.getfloat('host_batch_interval',
+                                        UPDATE_INTERVAL, above=0.05,
+                                        below=2.0)
+        chip_smooth = self.sps * batch_interval * 2
         self.ffreader = bulk_sensor.FixedFreqReader(mcu, chip_smooth, "<i")
         self.batch_bulk = bulk_sensor.BatchBulkHelper(
             self.printer, self._process_batch, self._start_measurements,
-            self._finish_measurements, UPDATE_INTERVAL)
+            self._finish_measurements, batch_interval)
         # Command configuration
         mcu.add_config_cmd(
             "config_cs1237 oid=%d config=%d dout_pin=%s sclk_pin=%s"
@@ -111,14 +113,13 @@ class CS1237:
 
     # Measurement decoding
     def _convert_samples(self, samples):
-        adc_factor = 1. / (1 << 23)
         for i, (ptime, val) in enumerate(samples):
             if val in (SAMPLE_ERROR_TIMEOUT, SAMPLE_ERROR_LONG_READ,
                        SAMPLE_ERROR_CONFIG):
                 self.last_error_count += 1
                 del samples[i:]
                 return
-            samples[i] = (round(ptime, 6), val, round(val * adc_factor, 9))
+            samples[i] = (ptime, val)
 
     # Start, stop, and process message batches
     def _start_measurements(self):
@@ -160,6 +161,8 @@ class CS1237:
                 self._start_measurements()
         else:
             self.consecutive_fails = 0
+        if not samples:
+            return None
         return {'data': samples, 'errors': self.last_error_count,
                 'overflows': self.ffreader.get_last_overflows()}
 
