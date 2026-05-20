@@ -112,22 +112,20 @@ class CS1237:
     # Measurement decoding
     def _convert_samples(self, samples):
         adc_factor = 1. / (1 << 23)
-        count = 0
-        for ptime, val in samples:
+        for i, (ptime, val) in enumerate(samples):
             if val in (SAMPLE_ERROR_TIMEOUT, SAMPLE_ERROR_LONG_READ,
                        SAMPLE_ERROR_CONFIG):
                 self.last_error_count += 1
-                break  # additional errors are duplicates
-            samples[count] = (round(ptime, 6), val, round(val * adc_factor, 9))
-            count += 1
-        del samples[count:]
+                del samples[i:]
+                return
+            samples[i] = (round(ptime, 6), val, round(val * adc_factor, 9))
 
     # Start, stop, and process message batches
     def _start_measurements(self):
         self.consecutive_fails = 0
         self.last_error_count = 0
-        # Start bulk reading
-        rest_ticks = self.mcu.seconds_to_clock(1. / (10. * self.sps))
+        # Start bulk reading - poll at 2x sample rate
+        rest_ticks = self.mcu.seconds_to_clock(1. / (2. * self.sps))
         self.query_cs1237_cmd.send([self.oid, rest_ticks])
         logging.info("CS1237 starting '%s' measurements", self.name)
         # Initialize clock tracking

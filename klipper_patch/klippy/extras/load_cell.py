@@ -379,6 +379,9 @@ class LoadCell:
                                    minval=MIN_COUNTS_PER_GRAM, default=None)
         self.invert = config.getchoice('sensor_orientation',
                         {'normal': 1., 'inverted': -1.}, default="normal")
+        self._grams_per_count = (self.invert / self.counts_per_gram
+                                 if self.counts_per_gram is not None
+                                 else None)
         LoadCellCommandHelper(config, self)
         # Client support:
         self.clients = ApiClientHelper(printer)
@@ -406,11 +409,13 @@ class LoadCell:
         overflows = msg.get("overflows")
         if data is None:
             return None
+        counts_to_grams = self.counts_to_grams
+        tare_counts = self.tare_counts
         samples = []
+        samples_append = samples.append
         for row in data:
-            # [time, grams, counts, tare_counts]
-            samples.append([row[0], self.counts_to_grams(row[1]), row[1],
-                            self.tare_counts])
+            samples_append([row[0], counts_to_grams(row[1]), row[1],
+                            tare_counts])
         msg = {'data': samples, 'errors': errors, 'overflows': overflows}
         self.clients.send(msg)
         return True
@@ -430,6 +435,7 @@ class LoadCell:
         if tare_counts is None:
             raise self.printer.command_error("Missing tare counts")
         self.counts_per_gram = counts_per_gram
+        self._grams_per_count = self.invert / self.counts_per_gram
         self.reference_tare_counts = int(tare_counts)
         configfile = self.printer.lookup_object('configfile')
         configfile.set(self.config_name, 'counts_per_gram',
@@ -441,8 +447,7 @@ class LoadCell:
     def counts_to_grams(self, sample):
         if not self.is_calibrated() or not self.is_tared():
             return None
-        sample_delta = float(sample - self.tare_counts)
-        return self.invert * (sample_delta / self.counts_per_gram)
+        return (sample - self.tare_counts) * self._grams_per_count
 
     # The maximum range of the sensor based on its bit width
     def saturation_range(self):
