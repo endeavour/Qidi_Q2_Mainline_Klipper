@@ -267,7 +267,9 @@ cs1237_event(struct timer *timer)
         // New sample pending
         cs1237->flags = CS_PENDING;
         sched_wake_task(&wake_cs1237);
-        rest_ticks *= 8;
+        // Host polls at 2*sps (rest_ticks). *8 capped delivery at sps/4
+        // (640 config -> ~160 SPS). *2 waits one conversion period.
+        rest_ticks *= 2;
     }
     cs1237->timer.waketime += rest_ticks;
     return SF_RESCHEDULE;
@@ -298,30 +300,37 @@ cs1237_read_adc(struct cs1237_adc *cs1237, uint8_t oid)
     irq_enable();
 
     uint32_t counts = 0;
+    uint8_t sample_valid = 0;
     if (flags & CS_OVERFLOW) {
         cs1237->last_error = SAMPLE_ERROR_READ_TOO_LONG;
         cs1237->sensor_error = CSE_OVERFLOW;
-    } else if (cs1237->last_error == 0) {
-        // Read from sensor (data ready should already be low)
-        if (!cs1237_is_data_ready(cs1237)) {
+        counts = cs1237->last_error;
+    } else if (flags & CS_PENDING) {
+        // Wait for DOUT ready (1280 SPS needs >~1ms conversion window)
+        if (cs1237_wait_data_ready(cs1237, timer_from_us(5000))) {
             cs1237->last_error = SAMPLE_ERROR_TIMEOUT;
             cs1237->sensor_error = CSE_READ_TIMEOUT;
+            counts = cs1237->last_error;
         } else {
             uint8_t status_bits = 0;
             counts = cs1237_read_frame(cs1237, &status_bits);
             (void)status_bits;
-            // Extend 24-bit 2's complement to 32 bits
             if (counts & 0x800000)
                 counts |= 0xFF000000;
+            cs1237->last_error = 0;
+            cs1237->sensor_error = 0;
+            sample_valid = 1;
         }
+    } else {
+        return;
     }
 
-    if (cs1237->last_error != 0) {
-        counts = cs1237->last_error;
-        trigger_analog_note_error(cs1237->ta, cs1237->sensor_error);
-    } else {
+    if (sample_valid) {
         cs1237->last_sample = (int32_t)counts;
         trigger_analog_update(cs1237->ta, counts);
+    } else if (cs1237->last_sample != 0) {
+        // Keep trigger_analog monitor alive on overflow/timeout glitches
+        trigger_analog_update(cs1237->ta, cs1237->last_sample);
     }
     add_sample(cs1237, oid, counts, 0);
 }

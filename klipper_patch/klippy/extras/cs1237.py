@@ -32,6 +32,8 @@ class CS1237:
         self.name = config.get_name().split()[-1]
         self.last_error_count = 0
         self.consecutive_fails = 0
+        self._last_error_log_time = 0.
+        self._last_sample_error = None
         self.query_cs1237_cmd = None
         # Chip options
         dout_pin_name = config.get('dout_pin')
@@ -111,12 +113,22 @@ class CS1237:
     def add_client(self, callback):
         self.batch_bulk.add_client(callback)
 
+    def _sample_error_name(self, val):
+        if val == SAMPLE_ERROR_TIMEOUT:
+            return "read_timeout"
+        if val == SAMPLE_ERROR_LONG_READ:
+            return "read_too_long"
+        if val == SAMPLE_ERROR_CONFIG:
+            return "config_error"
+        return "0x%x" % (val,)
+
     # Measurement decoding
     def _convert_samples(self, samples):
         for i, (ptime, val) in enumerate(samples):
             if val in (SAMPLE_ERROR_TIMEOUT, SAMPLE_ERROR_LONG_READ,
                        SAMPLE_ERROR_CONFIG):
                 self.last_error_count += 1
+                self._last_sample_error = val
                 del samples[i:]
                 return
             samples[i] = (ptime, val)
@@ -149,9 +161,11 @@ class CS1237:
         overflows = self.ffreader.get_last_overflows() - prev_overflows
         errors = self.last_error_count - prev_error_count
         if errors > 0:
-            logging.error("%s: Forced sensor restart due to error", self.name)
-            self._finish_measurements()
-            self._start_measurements()
+            err_name = self._sample_error_name(self._last_sample_error)
+            if eventtime - self._last_error_log_time > 5.0:
+                logging.warning("%s: bulk sample error (%s)", self.name,
+                                err_name)
+                self._last_error_log_time = eventtime
         elif overflows > 0:
             self.consecutive_fails += 1
             if self.consecutive_fails > 4:
@@ -162,9 +176,10 @@ class CS1237:
         else:
             self.consecutive_fails = 0
         if not samples:
-            return None
-        return {'data': samples, 'errors': self.last_error_count,
-                'overflows': self.ffreader.get_last_overflows()}
+            if not errors and not overflows:
+                return None
+            return {'data': [], 'errors': errors, 'overflows': overflows}
+        return {'data': samples, 'errors': errors, 'overflows': overflows}
 
 
 CS1237_SENSOR_TYPE = {"cs1237": CS1237, "c_sensor": CS1237}
